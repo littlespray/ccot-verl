@@ -216,6 +216,61 @@ class LightR1Dataset(RLHFDataset):
             ratio_list.append(ratio)
         return ratio_list 
 
+    def get_step_cot_ratio(self, dataset_len: int, all: bool = False, reverse: bool = False) -> List[float]:
+
+        # 前20%的data_len值施加影响，其他的不受影响ratio=0.0
+        # 如果reverse=True，则后20%的值施加影响，其他的不受影响
+        # 如果all=True，则受到的影响为这一部分ratio全为1.0
+        # 如果all=False，则受到的影响为这一部分ratio为从0.0变到0.1，再到0.2，0.3，0.4，0.5直到0.6，均匀变化。
+        
+        ratio_list = []
+        affected_size = int(dataset_len * 0.2)  # 20% of dataset
+        
+        if all:
+            # If all=True, affected portion gets ratio=1.0
+            affected_ratio = 1.0
+            for idx in range(dataset_len):
+                if not reverse:
+                    # Front 20% affected
+                    if idx < affected_size:
+                        ratio_list.append(affected_ratio)
+                    else:
+                        ratio_list.append(0.0)
+                else:
+                    # Rear 20% affected
+                    if idx >= dataset_len - affected_size:
+                        ratio_list.append(affected_ratio)
+                    else:
+                        ratio_list.append(0.0)
+        else:
+            # If all=False, affected portion gets gradual increase from 0.0 to 0.6
+            # Create step values: 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6
+            step_values = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
+            
+            for idx in range(dataset_len):
+                if not reverse:
+                    # Front 20% affected
+                    if idx < affected_size:
+                        # Map index to step value
+                        # Divide affected portion into len(step_values) segments
+                        segment_size = affected_size / len(step_values)
+                        segment_idx = min(int(idx / segment_size), len(step_values) - 1)
+                        ratio_list.append(step_values[segment_idx])
+                    else:
+                        ratio_list.append(0.0)
+                else:
+                    # Rear 20% affected
+                    if idx >= dataset_len - affected_size:
+                        # Map index to step value
+                        # Calculate position within the affected portion
+                        pos_in_affected = idx - (dataset_len - affected_size)
+                        segment_size = affected_size / len(step_values)
+                        segment_idx = min(int(pos_in_affected / segment_size), len(step_values) - 1)
+                        ratio_list.append(step_values[segment_idx])
+                    else:
+                        ratio_list.append(0.0)
+        
+        return ratio_list
 
     
     def _get_cot_ratio_list(self) -> List[float]:
@@ -235,6 +290,14 @@ class LightR1Dataset(RLHFDataset):
             return self.get_reverse_window_cot_ratio(dataset_len)
         elif self.ccot_scheduler.lower() == "custom":
             return self.get_custom_cot_ratio(dataset_len)
+        elif self.ccot_scheduler.lower() == "step":
+            return self.get_step_cot_ratio(dataset_len)
+        elif self.ccot_scheduler.lower() == "step_all":
+            return self.get_step_cot_ratio(dataset_len, all=True)
+        elif self.ccot_scheduler.lower() == "step_reverse":
+            return self.get_step_cot_ratio(dataset_len, reverse=True)
+        elif self.ccot_scheduler.lower() == "step_reverse_all":
+            return self.get_step_cot_ratio(dataset_len, reverse=True, all=True)
         else:
             raise ValueError(f"Unknown CCOT scheduler: {self.ccot_scheduler}")
     
@@ -339,40 +402,18 @@ class LightR1Dataset(RLHFDataset):
         input_ids = model_inputs.pop("input_ids")
         attention_mask = model_inputs.pop("attention_mask")
 
-        if not self.processor_type == "MiniCPMVImageProcessor":
-            input_ids, attention_mask = verl_F.postprocess_data(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                max_length=self.max_prompt_length,
-                pad_token_id=self.tokenizer.pad_token_id,
-                left_pad=True,
-                truncation=self.truncation,
-            )
-
-            if self.processor is not None and "Qwen2VLImageProcessor" in self.processor.image_processor.__class__.__name__:
-                from verl.models.transformers.qwen2_vl import get_rope_index
-
-                position_ids = [
-                    get_rope_index(
-                        self.processor,
-                        input_ids=input_ids[0],
-                        image_grid_thw=model_inputs.get("image_grid_thw"),
-                        video_grid_thw=model_inputs.get("video_grid_thw"),
-                        second_per_grid_ts=model_inputs.get("second_per_grid_ts"),
-                        attention_mask=attention_mask[0],
-                    )
-                ]  # (1, 3, seq_len)
-
-            else:
-                position_ids = compute_position_id_with_mask(attention_mask)
-
-            row_dict["input_ids"] = input_ids[0]
-            row_dict["attention_mask"] = attention_mask[0]
-            row_dict["position_ids"] = position_ids[0]
-        else:
-            row_dict["input_ids"] = input_ids
-            row_dict["attention_mask"] = attention_mask
-            row_dict["position_ids"] = position_ids
+        input_ids, attention_mask = verl_F.postprocess_data(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            max_length=self.max_prompt_length,
+            pad_token_id=self.tokenizer.pad_token_id,
+            left_pad=True,
+            truncation=self.truncation,
+        )
+        position_ids = compute_position_id_with_mask(attention_mask)
+        row_dict["input_ids"] = input_ids[0]
+        row_dict["attention_mask"] = attention_mask[0]
+        row_dict["position_ids"] = position_ids[0]
 
         raw_prompt_ids = self.tokenizer.encode(raw_prompt, add_special_tokens=False)
         if len(raw_prompt_ids) > self.max_prompt_length:

@@ -51,25 +51,32 @@ def delete_invalid_branches(api: HfApi, repo_id: str, token: str, branches: list
             continue
             
         try:
-            # Check if finish_check.txt exists in the branch root
-            api.file_exists(
+            # List files in the branch to check if finish_check.txt exists
+            files = api.list_repo_files(
                 repo_id=repo_id,
-                filename="finish_check.txt",
                 revision=branch,
                 token=token
             )
-            # If we get here, the file exists
-            valid_branches.append(branch)
-            print(f"Branch {branch}: Valid (contains finish_check.txt)")
             
-        except Exception:
-            # File doesn't exist or other error, delete the branch
-            try:
+            # Check if finish_check.txt is in the files list
+            if "finish_check.txt" in files:
+                valid_branches.append(branch)
+                print(f"Branch {branch}: Valid (contains finish_check.txt)")
+            else:
+                # File doesn't exist, delete the branch
                 print(f"Branch {branch}: Invalid (missing finish_check.txt), deleting...")
                 api.delete_branch(repo_id=repo_id, branch=branch, token=token)
                 print(f"  ✗ Deleted branch: {branch}")
-            except Exception as e:
-                print(f"  ! Failed to delete branch {branch}: {e}")
+                
+        except Exception as e:
+            # Error accessing branch or listing files
+            print(f"Branch {branch}: Error checking files: {e}")
+            try:
+                # Try to delete the problematic branch
+                api.delete_branch(repo_id=repo_id, branch=branch, token=token)
+                print(f"  ✗ Deleted problematic branch: {branch}")
+            except Exception as del_e:
+                print(f"  ! Failed to delete branch {branch}: {del_e}")
                 # Still don't include it in valid branches
     
     return valid_branches
@@ -107,7 +114,6 @@ def get_latest_branch(repo_id: str, token: str) -> str:
                         timestamp_branches.append(branch_name)
                 except:
                     continue
-        
         if timestamp_branches:
             # Sort alphabetically (works for YYYYMMDD_HHMMSS format)
             timestamp_branches.sort()
@@ -156,6 +162,11 @@ def download_from_hf(repo_id: str, local_dir: str, token: str, branch: str = Non
     else:
         target_branch = get_latest_branch(repo_id, token)
     
+
+    if target_branch == "main":
+        print("No available checkpoint branches found. Stop Resume.")
+        return False
+    
     try:
         # Create parent directories if they don't exist
         os.makedirs(os.path.dirname(local_dir), exist_ok=True)
@@ -174,6 +185,9 @@ def download_from_hf(repo_id: str, local_dir: str, token: str, branch: str = Non
         
     except Exception as e:
         print(f"Error downloading from HF: {e}")
+        return False
+    
+    return True
 
 
 def main():
@@ -229,7 +243,9 @@ def main():
         return
     
     # Download from HF
-    download_from_hf(repo_id, input_path, args.hf_token, args.branch)
+    status = download_from_hf(repo_id, input_path, args.hf_token, args.branch)
+    if not status:
+        return
     
     # Verify download
     if os.path.exists(input_path):

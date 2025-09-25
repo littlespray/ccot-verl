@@ -6,7 +6,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 
 
 project_name='verl-debug'
-exp_name='DAPO-Qwen2.5-debug6'
+exp_name='DAPO-Qwen2.5-debug7'
 
 adv_estimator=grpo
 
@@ -44,7 +44,8 @@ NNODES=${NNODES:-1}
 RAY_DATA_HOME=${RAY_DATA_HOME:-"${PWD}"}
 MODEL_PATH=${MODEL_PATH:-"Qwen/Qwen2.5-7B"}
 CKPTS_DIR=${CKPTS_DIR:-"${RAY_DATA_HOME}/ckpts/${project_name}/${exp_name}"}
-TRAIN_FILE=${TRAIN_FILE:-"${RAY_DATA_HOME}/data/dapo-math-17k.parquet"}
+# TRAIN_FILE=${TRAIN_FILE:-"${RAY_DATA_HOME}/data/dapo-math-17k.parquet"}
+TRAIN_FILE=${TRAIN_FILE:-"${RAY_DATA_HOME}/data/train.parquet"}
 TEST_FILE=${TEST_FILE:-"${RAY_DATA_HOME}/data/aime-2024.parquet"}
 
 
@@ -71,13 +72,21 @@ infer_ppo_max_token_len=$((max_prompt_length + max_response_length))
 offload=True
 gen_tp=4
 
+ccot_scheduler="all"
+enable_ccot=True
+add_cot_to_answer=True
+
 # ray start --head --port=6379
 
 ray job submit --no-wait --runtime-env="${RUNTIME_ENV}" \
     --working-dir "${WORKING_DIR}" \
     -- python3 -m recipe.dapo.main_dapo \
+    --config-name=dapo_trainer_lightr1 \
     data.train_files="${TRAIN_FILE}" \
     data.val_files="${TEST_FILE}" \
+    data.ccot_scheduler=${ccot_scheduler} \
+    data.enable_ccot=${enable_ccot} \
+    data.add_cot_to_answer=${add_cot_to_answer} \
     data.prompt_key=prompt \
     data.truncation='left' \
     data.max_prompt_length=${max_prompt_length} \

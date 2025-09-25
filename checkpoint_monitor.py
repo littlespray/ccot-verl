@@ -14,6 +14,58 @@ from datetime import datetime
 from huggingface_hub import HfApi, create_repo, upload_folder
 
 
+def delete_invalid_branches(api: HfApi, repo_id: str, token: str, branches: list) -> list:
+    """
+    Delete branches that don't have finish_check.txt file.
+    Returns the list of valid branches after cleanup.
+    
+    Args:
+        api: HfApi instance
+        repo_id: Repository ID
+        token: HF authentication token
+        branches: List of branch names to check
+        
+    Returns:
+        List of valid branches that contain finish_check.txt
+    """
+    valid_branches = []
+    
+    for branch in branches:
+        if branch == "main":
+            valid_branches.append(branch)
+            continue
+            
+        try:
+            # List files in the branch to check if finish_check.txt exists
+            files = api.list_repo_files(
+                repo_id=repo_id,
+                revision=branch,
+                token=token
+            )
+            
+            # Check if finish_check.txt is in the files list
+            if "finish_check.txt" in files:
+                valid_branches.append(branch)
+                print(f"Branch {branch}: Valid (contains finish_check.txt)")
+            else:
+                # File doesn't exist, delete the branch
+                print(f"Branch {branch}: Invalid (missing finish_check.txt), deleting...")
+                api.delete_branch(repo_id=repo_id, branch=branch, token=token)
+                print(f"  ✗ Deleted branch: {branch}")
+                
+        except Exception as e:
+            # Error accessing branch or listing files
+            print(f"Branch {branch}: Error checking files: {e}")
+            try:
+                # Try to delete the problematic branch
+                api.delete_branch(repo_id=repo_id, branch=branch, token=token)
+                print(f"  ✗ Deleted problematic branch: {branch}")
+            except Exception as del_e:
+                print(f"  ! Failed to delete branch {branch}: {del_e}")
+                # Still don't include it in valid branches
+    
+    return valid_branches
+
 def read_latest_step(input_path: Path) -> int:
     """Read the latest step from latest_checkpointed_iteration.txt"""
     iteration_file = input_path / "latest_checkpointed_iteration.txt"
@@ -127,8 +179,12 @@ def _cleanup_old_branches(api: HfApi, repo_id: str, token: str, keep_count: int 
                 except:
                     continue
         
+
+
+        # timestamp_branches = delete_invalid_branches(api, repo_id, token, timestamp_branches)
         # Sort by timestamp (branch names are sortable as strings)
         timestamp_branches.sort()
+
         
         # Delete old branches
         if len(timestamp_branches) > keep_count:
