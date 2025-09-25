@@ -6,7 +6,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 
 
 project_name='verl-debug'
-exp_name='DAPO-Qwen2.5-debug5'
+exp_name='DAPO-Qwen2.5-debug6'
 
 adv_estimator=grpo
 

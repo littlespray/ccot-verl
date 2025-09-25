@@ -88,6 +88,17 @@ def upload_checkpoint_to_hf(checkpoint_path: str, repo_name: str, step: int, hf_
             revision=branch_name,
             commit_message=f"Step {step}: Checkpoint upload"
         )
+        
+        # Upload finish_check.txt to mark this branch as complete
+        finish_check_content = f"Checkpoint upload completed at {datetime.now().isoformat()}\nStep: {step}\n"
+        api.upload_file(
+            path_or_fileobj=finish_check_content.encode(),
+            path_in_repo="finish_check.txt",
+            repo_id=repo_id,
+            token=hf_token,
+            revision=branch_name,
+            commit_message="Mark checkpoint upload as complete"
+        )
 
         print(f"Uploaded to: https://huggingface.co/{repo_id}/tree/{branch_name}")
         

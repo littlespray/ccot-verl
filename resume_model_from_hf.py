@@ -29,6 +29,52 @@ def check_hf_repo_exists(repo_id: str, token: str) -> bool:
         return False
 
 
+def delete_invalid_branches(api: HfApi, repo_id: str, token: str, branches: list) -> list:
+    """
+    Delete branches that don't have finish_check.txt file.
+    Returns the list of valid branches after cleanup.
+    
+    Args:
+        api: HfApi instance
+        repo_id: Repository ID
+        token: HF authentication token
+        branches: List of branch names to check
+        
+    Returns:
+        List of valid branches that contain finish_check.txt
+    """
+    valid_branches = []
+    
+    for branch in branches:
+        if branch == "main":
+            valid_branches.append(branch)
+            continue
+            
+        try:
+            # Check if finish_check.txt exists in the branch root
+            api.file_exists(
+                repo_id=repo_id,
+                filename="finish_check.txt",
+                revision=branch,
+                token=token
+            )
+            # If we get here, the file exists
+            valid_branches.append(branch)
+            print(f"Branch {branch}: Valid (contains finish_check.txt)")
+            
+        except Exception:
+            # File doesn't exist or other error, delete the branch
+            try:
+                print(f"Branch {branch}: Invalid (missing finish_check.txt), deleting...")
+                api.delete_branch(repo_id=repo_id, branch=branch, token=token)
+                print(f"  ✗ Deleted branch: {branch}")
+            except Exception as e:
+                print(f"  ! Failed to delete branch {branch}: {e}")
+                # Still don't include it in valid branches
+    
+    return valid_branches
+
+
 def get_latest_branch(repo_id: str, token: str) -> str:
     """
     Get the latest branch from HuggingFace repository.
@@ -65,10 +111,20 @@ def get_latest_branch(repo_id: str, token: str) -> str:
         if timestamp_branches:
             # Sort alphabetically (works for YYYYMMDD_HHMMSS format)
             timestamp_branches.sort()
-            latest_branch = timestamp_branches[-1]  # Get the last (newest) one
-            print(f"Found {len(timestamp_branches)} checkpoint branches")
-            print(f"Latest branch: {latest_branch}")
-            return latest_branch
+            
+            # Delete invalid branches (those without finish_check.txt)
+            valid_branches = delete_invalid_branches(api, repo_id, token, timestamp_branches)
+            
+            if valid_branches:
+                # Get the latest valid branch
+                valid_branches.sort()  # Re-sort in case order changed
+                latest_branch = valid_branches[-1]  # Get the last (newest) one
+                print(f"Found {len(valid_branches)} valid checkpoint branches")
+                print(f"Latest branch: {latest_branch}")
+                return latest_branch
+            else:
+                print("No valid timestamp branches found (all missing finish_check.txt), using main branch")
+                return "main"
         else:
             print("No timestamp branches found, using main branch")
             return "main"
