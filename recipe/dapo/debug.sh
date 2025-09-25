@@ -6,7 +6,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 
 
 project_name='verl-debug'
-exp_name='DAPO-Qwen2.5-debug4'
+exp_name='DAPO-Qwen2.5-debug5'
 
 adv_estimator=grpo
 
@@ -48,9 +48,9 @@ TRAIN_FILE=${TRAIN_FILE:-"${RAY_DATA_HOME}/data/dapo-math-17k.parquet"}
 TEST_FILE=${TEST_FILE:-"${RAY_DATA_HOME}/data/aime-2024.parquet"}
 
 
-python resume_model_from_hf.py --input_path "${CKPTS_DIR}" --hf_token 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
+python resume_model_from_hf.py --input_path "${CKPTS_DIR}"
 
-python checkpoint_monitor.py --input_path "${CKPTS_DIR}" --hf_token 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 --interval 5 &
+python checkpoint_monitor.py --input_path "${CKPTS_DIR}" --interval 5 &
 
 
 
@@ -142,9 +142,9 @@ ray job submit --no-wait --runtime-env="${RUNTIME_ENV}" \
     trainer.n_gpus_per_node=8 \
     trainer.nnodes="${NNODES}" \
     trainer.val_before_train=False \
-    trainer.max_actor_ckpt_to_keep=10 \
+    trainer.max_actor_ckpt_to_keep=5 \
     trainer.test_freq=100 \
-    trainer.save_freq=3 \
+    trainer.save_freq=10 \
     trainer.total_epochs=1 \
     trainer.default_local_dir="${CKPTS_DIR}" \
     trainer.resume_mode=auto 2>&1

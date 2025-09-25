@@ -112,14 +112,12 @@ def download_from_hf(repo_id: str, local_dir: str, token: str, branch: str = Non
             local_dir=local_dir,
             token=token,
             local_dir_use_symlinks=False,  # Download actual files, not symlinks
-            resume_download=True,  # Resume if download was interrupted
         )
         
         print(f"Successfully downloaded {repo_id} (branch: {target_branch}) to {local_dir}")
         
     except Exception as e:
         print(f"Error downloading from HF: {e}")
-        sys.exit(1)
 
 
 def main():
@@ -131,12 +129,6 @@ def main():
         type=str,
         required=True,
         help="Local path to check/download model to. The basename will be used as the HF repo name."
-    )
-    parser.add_argument(
-        "--hf_token",
-        type=str,
-        required=True,
-        help="Hugging Face authentication token"
     )
     parser.add_argument(
         "--hf_user",
@@ -157,6 +149,7 @@ def main():
     )
     
     args = parser.parse_args()
+    args.hf_token = os.getenv("HF_TOKEN")
     
     # Convert to absolute path
     input_path = os.path.abspath(args.input_path)
@@ -191,7 +184,6 @@ def main():
             print(f"Warning: Downloaded directory appears to be empty: {input_path}")
     else:
         print(f"Error: Download completed but path not found: {input_path}")
-        sys.exit(1)
 
 
 if __name__ == "__main__":

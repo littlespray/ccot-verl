@@ -199,11 +199,11 @@ def main():
     parser = argparse.ArgumentParser(description="Monitor and upload checkpoints to HuggingFace")
     parser.add_argument("--input_path", help="Path to monitor for checkpoints")
     parser.add_argument("--hf_user", default="sunshk", help="HuggingFace username (default: sunshk)")
-    parser.add_argument("--hf_token", required=True, help="HuggingFace API token")
     parser.add_argument("--interval", type=int, default=60, 
                        help="Check interval in seconds (default: 60 = 1 minutes)")
     
     args = parser.parse_args()
+    args.hf_token = os.getenv("HF_TOKEN")
     
     # Validate input path
     input_path = Path(args.input_path)
