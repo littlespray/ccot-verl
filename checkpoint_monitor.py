@@ -161,7 +161,7 @@ def upload_checkpoint_to_hf(checkpoint_path: str, repo_name: str, step: int, hf_
         print(f"Error during upload: {e}")
 
 
-def _cleanup_old_branches(api: HfApi, repo_id: str, token: str, keep_count: int = 5):
+def _cleanup_old_branches(api: HfApi, repo_id: str, token: str, keep_count: int = 3):
     """Keep only the latest N branches."""
     try:
         refs = api.list_repo_refs(repo_id=repo_id, token=token)
