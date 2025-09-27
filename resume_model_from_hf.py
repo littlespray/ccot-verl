@@ -8,180 +8,136 @@ import os
 import sys
 import argparse
 from pathlib import Path
-from huggingface_hub import snapshot_download, repo_exists, HfApi
+from huggingface_hub import snapshot_download, HfApi
 
 
-def check_hf_repo_exists(repo_id: str, token: str) -> bool:
+def find_valid_timestamped_repos(api: HfApi, base_repo_name: str, hf_user: str, token: str) -> list:
     """
-    Check if a repository exists on Hugging Face Hub.
-    
-    Args:
-        repo_id: Repository ID in format "username/repo_name"
-        token: HF authentication token
-    
-    Returns:
-        True if repo exists, False otherwise
-    """
-    try:
-        return repo_exists(repo_id, token=token)
-    except Exception as e:
-        print(f"Error checking HF repo: {e}")
-        return False
-
-
-def delete_invalid_branches(api: HfApi, repo_id: str, token: str, branches: list) -> list:
-    """
-    Delete branches that don't have finish_check.txt file.
-    Returns the list of valid branches after cleanup.
+    Find valid timestamped repositories that contain finish_check.txt.
     
     Args:
         api: HfApi instance
-        repo_id: Repository ID
+        base_repo_name: Base repository name (without timestamp)
+        hf_user: HuggingFace username
         token: HF authentication token
-        branches: List of branch names to check
         
     Returns:
-        List of valid branches that contain finish_check.txt
+        List of tuples (timestamp, repo_id) for valid repositories, sorted by timestamp
     """
-    valid_branches = []
+    valid_repos = []
     
-    for branch in branches:
-        if branch == "main":
-            valid_branches.append(branch)
-            continue
-            
-        try:
-            # List files in the branch to check if finish_check.txt exists
-            files = api.list_repo_files(
-                repo_id=repo_id,
-                revision=branch,
-                token=token
-            )
-            
-            # Check if finish_check.txt is in the files list
-            if "finish_check.txt" in files:
-                valid_branches.append(branch)
-                print(f"Branch {branch}: Valid (contains finish_check.txt)")
-            else:
-                # File doesn't exist, delete the branch
-                print(f"Branch {branch}: Invalid (missing finish_check.txt), deleting...")
-                api.delete_branch(repo_id=repo_id, branch=branch, token=token)
-                print(f"  ✗ Deleted branch: {branch}")
-                
-        except Exception as e:
-            # Error accessing branch or listing files
-            print(f"Branch {branch}: Error checking files: {e}")
-            try:
-                # Try to delete the problematic branch
-                api.delete_branch(repo_id=repo_id, branch=branch, token=token)
-                print(f"  ✗ Deleted problematic branch: {branch}")
-            except Exception as del_e:
-                print(f"  ! Failed to delete branch {branch}: {del_e}")
-                # Still don't include it in valid branches
+    try:
+        # List all repositories for the user
+        repos = api.list_models(author=hf_user, token=token)
+        
+        # Find timestamped repositories matching pattern
+        pattern_prefix = f"{base_repo_name}-"
+        
+        for repo in repos:
+            repo_name = repo.modelId.split('/')[-1]  # Get repo name without user prefix
+            if repo_name.startswith(pattern_prefix):
+                # Extract timestamp suffix
+                suffix = repo_name[len(pattern_prefix):]
+                # Validate timestamp format YYYYMMDD_HHMMSS
+                if len(suffix) == 15 and suffix[8] == '_':
+                    try:
+                        date_part = suffix[:8]
+                        time_part = suffix[9:]
+                        if date_part.isdigit() and time_part.isdigit():
+                            # Check if repository has finish_check.txt
+                            try:
+                                files = api.list_repo_files(
+                                    repo_id=repo.modelId,
+                                    token=token
+                                )
+                                if "finish_check.txt" in files:
+                                    valid_repos.append((suffix, repo.modelId))
+                                    print(f"Found valid repository: {repo.modelId}")
+                                else:
+                                    print(f"Repository {repo.modelId}: Missing finish_check.txt, skipping")
+                            except Exception as e:
+                                print(f"Error checking repository {repo.modelId}: {e}")
+                    except:
+                        continue
+        
+        # Sort by timestamp
+        valid_repos.sort(key=lambda x: x[0])
+        
+    except Exception as e:
+        print(f"Error searching for repositories: {e}")
     
-    return valid_branches
+    return valid_repos
 
 
-def get_latest_branch(repo_id: str, token: str) -> str:
+def get_latest_timestamped_repo(base_repo_name: str, hf_user: str, token: str) -> str:
     """
-    Get the latest branch from HuggingFace repository.
-    Branches are in format YYYYMMDD_HHMMSS, so alphabetical sort gives us the latest.
+    Get the latest timestamped repository for a given base name.
+    Repositories are in format {base_name}-YYYYMMDD_HHMMSS.
     
     Args:
-        repo_id: Repository ID in format "username/repo_name"
+        base_repo_name: Base repository name (without timestamp)
+        hf_user: HuggingFace username
         token: HF authentication token
         
     Returns:
-        Latest branch name, or "main" if no timestamp branches found
+        Latest repository ID, or None if no timestamped repositories found
     """
     api = HfApi(token=token)
     
-    try:
-        # Get all branches
-        refs = api.list_repo_refs(repo_id=repo_id, token=token)
-        
-        # Find timestamp branches (format: YYYYMMDD_HHMMSS)
-        timestamp_branches = []
-        for branch in refs.branches:
-            branch_name = branch.ref.replace("refs/heads/", "")
-            # Check if it matches timestamp format
-            if len(branch_name) == 15 and branch_name[8] == '_':
-                try:
-                    # Validate it's a valid timestamp format
-                    date_part = branch_name[:8]
-                    time_part = branch_name[9:]
-                    if date_part.isdigit() and time_part.isdigit():
-                        timestamp_branches.append(branch_name)
-                except:
-                    continue
-        if timestamp_branches:
-            # Sort alphabetically (works for YYYYMMDD_HHMMSS format)
-            timestamp_branches.sort()
-            
-            # Delete invalid branches (those without finish_check.txt)
-            valid_branches = delete_invalid_branches(api, repo_id, token, timestamp_branches)
-            
-            if valid_branches:
-                # Get the latest valid branch
-                valid_branches.sort()  # Re-sort in case order changed
-                latest_branch = valid_branches[-1]  # Get the last (newest) one
-                print(f"Found {len(valid_branches)} valid checkpoint branches")
-                print(f"Latest branch: {latest_branch}")
-                return latest_branch
-            else:
-                print("No valid timestamp branches found (all missing finish_check.txt), using main branch")
-                return "main"
-        else:
-            print("No timestamp branches found, using main branch")
-            return "main"
-            
-    except Exception as e:
-        print(f"Error getting branches: {e}")
-        print("Falling back to main branch")
-        return "main"
+    # Find valid timestamped repositories
+    valid_repos = find_valid_timestamped_repos(api, base_repo_name, hf_user, token)
+    
+    if valid_repos:
+        # Get the latest (last in sorted list)
+        latest_timestamp, latest_repo_id = valid_repos[-1]
+        print(f"Found {len(valid_repos)} valid timestamped repositories")
+        print(f"Latest repository: {latest_repo_id} (timestamp: {latest_timestamp})")
+        return latest_repo_id
+    else:
+        print("No valid timestamped repositories found")
+        return None
 
 
-def download_from_hf(repo_id: str, local_dir: str, token: str, branch: str = None):
+def download_from_hf(base_repo_name: str, hf_user: str, local_dir: str, token: str, specific_repo: str = None):
     """
     Download model from Hugging Face Hub to local directory.
-    Automatically downloads the latest checkpoint branch unless a specific branch is provided.
+    Automatically downloads the latest timestamped repository unless a specific one is provided.
     
     Args:
-        repo_id: Repository ID in format "username/repo_name"
+        base_repo_name: Base repository name (without timestamp)
+        hf_user: HuggingFace username
         local_dir: Local directory to download to
         token: HF authentication token
-        branch: Specific branch to download (optional, defaults to latest)
+        specific_repo: Specific repository ID to download (optional, defaults to latest)
     """
-    print(f"Downloading from Hugging Face Hub: {repo_id}")
-    print(f"Target directory: {local_dir}")
-    
-    # Get the branch to download
-    if branch:
-        target_branch = branch
-        print(f"Using specified branch: {target_branch}")
+    # Determine which repository to download
+    if specific_repo:
+        target_repo_id = specific_repo
+        print(f"Using specified repository: {target_repo_id}")
     else:
-        target_branch = get_latest_branch(repo_id, token)
+        target_repo_id = get_latest_timestamped_repo(base_repo_name, hf_user, token)
     
-
-    if target_branch == "main":
-        print("No available checkpoint branches found. Stop Resume.")
+    if not target_repo_id:
+        print("No available timestamped repositories found. Stop Resume.")
         return False
+    
+    print(f"Downloading from Hugging Face Hub: {target_repo_id}")
+    print(f"Target directory: {local_dir}")
     
     try:
         # Create parent directories if they don't exist
         os.makedirs(os.path.dirname(local_dir), exist_ok=True)
         
-        # Download the specific branch
-        print(f"Downloading branch: {target_branch}")
+        # Download the repository
+        print(f"Downloading repository: {target_repo_id}")
         snapshot_download(
-            repo_id=repo_id,
-            revision=target_branch,  # Download specific branch
+            repo_id=target_repo_id,
             local_dir=local_dir,
             token=token,
             local_dir_use_symlinks=False,  # Download actual files, not symlinks
         )
         
-        print(f"Successfully downloaded {repo_id} (branch: {target_branch}) to {local_dir}")
+        print(f"Successfully downloaded {target_repo_id} to {local_dir}")
         
     except Exception as e:
         print(f"Error downloading from HF: {e}")
@@ -215,7 +171,7 @@ def main():
         "--branch",
         type=str,
         default=None,
-        help="Specific branch to download (default: auto-detect latest)"
+        help="Specific repository to download (full repo ID, default: auto-detect latest timestamped)"
     )
     
     args = parser.parse_args()
@@ -231,19 +187,12 @@ def main():
         return
     
     # Extract repository name from path basename
-    repo_name = os.path.basename(input_path)
-    repo_id = f"{args.hf_user}/{repo_name}"
+    base_repo_name = os.path.basename(input_path)
     
-    print(f"Checking Hugging Face repository: {repo_id}")
-    
-    # Check if HF repo exists
-    if not check_hf_repo_exists(repo_id, args.hf_token):
-        print(f"Warning: Repository {repo_id} does not exist on Hugging Face Hub")
-        print(f"Skipping download. Local path will not be created: {input_path}")
-        return
+    print(f"Searching for timestamped repositories with base name: {base_repo_name}")
     
     # Download from HF
-    status = download_from_hf(repo_id, input_path, args.hf_token, args.branch)
+    status = download_from_hf(base_repo_name, args.hf_user, input_path, args.hf_token, args.branch)
     if not status:
         return
     

@@ -6,7 +6,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 
 
 project_name='verl-debug'
-exp_name='DAPO-Qwen2.5-debug7'
+exp_name='resume-test'
 
 adv_estimator=grpo
 
@@ -152,7 +152,7 @@ ray job submit --no-wait --runtime-env="${RUNTIME_ENV}" \
     trainer.nnodes="${NNODES}" \
     trainer.val_before_train=False \
     trainer.max_actor_ckpt_to_keep=5 \
-    trainer.test_freq=1 \
+    trainer.test_freq=100 \
     trainer.save_freq=10 \
     trainer.total_epochs=1 \
     trainer.default_local_dir="${CKPTS_DIR}" \

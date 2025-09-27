@@ -14,57 +14,51 @@ from datetime import datetime
 from huggingface_hub import HfApi, create_repo, upload_folder
 
 
-def delete_invalid_branches(api: HfApi, repo_id: str, token: str, branches: list) -> list:
+def delete_invalid_repositories(api: HfApi, timestamped_repos: list, token: str) -> list:
     """
-    Delete branches that don't have finish_check.txt file.
-    Returns the list of valid branches after cleanup.
+    Delete repositories that don't have finish_check.txt file.
+    Returns the list of valid repositories after cleanup.
     
     Args:
         api: HfApi instance
-        repo_id: Repository ID
+        timestamped_repos: List of tuples (timestamp, repo_id) to check
         token: HF authentication token
-        branches: List of branch names to check
         
     Returns:
-        List of valid branches that contain finish_check.txt
+        List of valid repositories that contain finish_check.txt
     """
-    valid_branches = []
+    valid_repos = []
     
-    for branch in branches:
-        if branch == "main":
-            valid_branches.append(branch)
-            continue
-            
+    for timestamp, repo_id in timestamped_repos:
         try:
-            # List files in the branch to check if finish_check.txt exists
+            # List files in the repository to check if finish_check.txt exists
             files = api.list_repo_files(
                 repo_id=repo_id,
-                revision=branch,
                 token=token
             )
             
             # Check if finish_check.txt is in the files list
             if "finish_check.txt" in files:
-                valid_branches.append(branch)
-                print(f"Branch {branch}: Valid (contains finish_check.txt)")
+                valid_repos.append((timestamp, repo_id))
+                print(f"Repository {repo_id}: Valid (contains finish_check.txt)")
             else:
-                # File doesn't exist, delete the branch
-                print(f"Branch {branch}: Invalid (missing finish_check.txt), deleting...")
-                api.delete_branch(repo_id=repo_id, branch=branch, token=token)
-                print(f"  ✗ Deleted branch: {branch}")
+                # File doesn't exist, delete the repository
+                print(f"Repository {repo_id}: Invalid (missing finish_check.txt), deleting...")
+                api.delete_repo(repo_id=repo_id, token=token)
+                print(f"  ✗ Deleted repository: {repo_id}")
                 
         except Exception as e:
-            # Error accessing branch or listing files
-            print(f"Branch {branch}: Error checking files: {e}")
+            # Error accessing repository or listing files
+            print(f"Repository {repo_id}: Error checking files: {e}")
             try:
-                # Try to delete the problematic branch
-                api.delete_branch(repo_id=repo_id, branch=branch, token=token)
-                print(f"  ✗ Deleted problematic branch: {branch}")
+                # Try to delete the problematic repository
+                api.delete_repo(repo_id=repo_id, token=token)
+                print(f"  ✗ Deleted problematic repository: {repo_id}")
             except Exception as del_e:
-                print(f"  ! Failed to delete branch {branch}: {del_e}")
-                # Still don't include it in valid branches
+                print(f"  ! Failed to delete repository {repo_id}: {del_e}")
+                # Still don't include it in valid repositories
     
-    return valid_branches
+    return valid_repos
 
 def read_latest_step(input_path: Path) -> int:
     """Read the latest step from latest_checkpointed_iteration.txt"""
@@ -83,13 +77,12 @@ def upload_checkpoint_to_hf(checkpoint_path: str, repo_name: str, step: int, hf_
     """
     Upload a checkpoint folder to Hugging Face Hub efficiently.
     
-    - Uploads only once to a timestamped branch
-    - Updates main branch reference without re-uploading
+    - Creates a new timestamped repository for each checkpoint
     - Maintains max 5 historical versions
     
     Args:
         checkpoint_path: Path to the checkpoint folder (e.g., input_path/global_step_100)
-        repo_name: Repository name on HuggingFace
+        repo_name: Base repository name on HuggingFace
         step: The step number for this checkpoint
         hf_user: Hugging Face username
         hf_token: Hugging Face API token
@@ -99,25 +92,18 @@ def upload_checkpoint_to_hf(checkpoint_path: str, repo_name: str, step: int, hf_
         print(f"Warning: Checkpoint folder {checkpoint_path} does not exist")
         return
     
-    repo_id = f"{hf_user}/{repo_name}"
+    # Generate timestamped repository name
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamped_repo_name = f"{repo_name}-{timestamp}"
+    repo_id = f"{hf_user}/{timestamped_repo_name}"
     api = HfApi(token=hf_token)
     
     try:
-        # Ensure repository exists
-        try:
-            api.repo_info(repo_id=repo_id, token=hf_token)
-        except:
-            print(f"Creating repository: {repo_id}")
-            create_repo(repo_id=repo_id, token=hf_token, private=False, exist_ok=True)
+        # Create new repository
+        print(f"Creating new repository: {repo_id}")
+        create_repo(repo_id=repo_id, token=hf_token, private=False, exist_ok=True)
         
-        # Generate unique branch name
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        branch_name = f"{timestamp}"
-        
-        print(f"Uploading checkpoint to {repo_id} on branch: {branch_name}")
-        
-        # Create branch and upload in one operation
-        api.create_branch(repo_id=repo_id, branch=branch_name, token=hf_token)
+        print(f"Uploading checkpoint to {repo_id}")
         
         # Upload latest_checkpointed_iteration.txt to root directory
         iteration_file = folder_path.parent / "latest_checkpointed_iteration.txt"
@@ -126,7 +112,6 @@ def upload_checkpoint_to_hf(checkpoint_path: str, repo_name: str, step: int, hf_
             path_in_repo="latest_checkpointed_iteration.txt",
             repo_id=repo_id,
             token=hf_token,
-            revision=branch_name,
             commit_message=f"Update latest_checkpointed_iteration.txt for step {step}"
         )
 
@@ -137,69 +122,72 @@ def upload_checkpoint_to_hf(checkpoint_path: str, repo_name: str, step: int, hf_
             repo_type="model",
             path_in_repo=folder_path.name,
             token=hf_token,
-            revision=branch_name,
             commit_message=f"Step {step}: Checkpoint upload"
         )
         
-        # Upload finish_check.txt to mark this branch as complete
+        # Upload finish_check.txt to mark this repository as complete
         finish_check_content = f"Checkpoint upload completed at {datetime.now().isoformat()}\nStep: {step}\n"
         api.upload_file(
             path_or_fileobj=finish_check_content.encode(),
             path_in_repo="finish_check.txt",
             repo_id=repo_id,
             token=hf_token,
-            revision=branch_name,
             commit_message="Mark checkpoint upload as complete"
         )
 
-        print(f"Uploaded to: https://huggingface.co/{repo_id}/tree/{branch_name}")
+        print(f"Uploaded to: https://huggingface.co/{repo_id}")
         
-        # Clean up old branches
-        _cleanup_old_branches(api, repo_id, hf_token)
+        # Clean up old repositories
+        _cleanup_old_repositories(hf_user, repo_name, hf_token)
                 
     except Exception as e:
         print(f"Error during upload: {e}")
 
 
-def _cleanup_old_branches(api: HfApi, repo_id: str, token: str, keep_count: int = 3):
-    """Keep only the latest N branches."""
+def _cleanup_old_repositories(hf_user: str, base_repo_name: str, token: str, keep_count: int = 3):
+    """Keep only the latest N timestamped repositories."""
+    api = HfApi(token=token)
+    
     try:
-        refs = api.list_repo_refs(repo_id=repo_id, token=token)
+        # List all repositories for the user
+        repos = api.list_models(author=hf_user, token=token)
         
-        # Find and sort timestamp branches
-        timestamp_branches = []
-        for branch in refs.branches:
-            name = branch.ref.replace("refs/heads/", "")
-            if name != "main":
-                # Try to parse as timestamp format YYYYMMDD_HHMMSS
-                try:
-                    # Validate timestamp format
-                    if len(name) == 15 and name[8] == '_':
-                        timestamp_branches.append(name)
-                except:
-                    continue
+        # Find timestamped repositories matching pattern
+        timestamped_repos = []
+        pattern_prefix = f"{base_repo_name}-"
         
-
-
-        # timestamp_branches = delete_invalid_branches(api, repo_id, token, timestamp_branches)
-        # Sort by timestamp (branch names are sortable as strings)
-        timestamp_branches.sort()
-
+        for repo in repos:
+            repo_name = repo.modelId.split('/')[-1]  # Get repo name without user prefix
+            if repo_name.startswith(pattern_prefix):
+                # Extract timestamp suffix
+                suffix = repo_name[len(pattern_prefix):]
+                # Validate timestamp format YYYYMMDD_HHMMSS
+                if len(suffix) == 15 and suffix[8] == '_':
+                    try:
+                        date_part = suffix[:8]
+                        time_part = suffix[9:]
+                        if date_part.isdigit() and time_part.isdigit():
+                            timestamped_repos.append((suffix, repo.modelId))
+                    except:
+                        continue
         
-        # Delete old branches
-        if len(timestamp_branches) > keep_count:
-            to_delete = timestamp_branches[:-keep_count]
-            print(f"Cleaning up {len(to_delete)} old branches...")
+        # Sort by timestamp
+        timestamped_repos.sort(key=lambda x: x[0])
+        
+        # Delete old repositories
+        if len(timestamped_repos) > keep_count:
+            to_delete = timestamped_repos[:-keep_count]
+            print(f"Cleaning up {len(to_delete)} old repositories...")
             
-            for branch_name in to_delete:
+            for timestamp, repo_id in to_delete:
                 try:
-                    api.delete_branch(repo_id=repo_id, branch=branch_name, token=token)
-                    print(f"  ✗ Deleted: {branch_name}")
+                    api.delete_repo(repo_id=repo_id, token=token)
+                    print(f"  ✗ Deleted repository: {repo_id}")
                 except Exception as e:
-                    print(f"  ! Failed to delete {branch_name}: {e}")
+                    print(f"  ! Failed to delete {repo_id}: {e}")
                 
     except Exception as e:
-        print(f"Note: Branch cleanup skipped: {e}")
+        print(f"Note: Repository cleanup skipped: {e}")
 
 
 def monitor_checkpoints(input_path: str, hf_user: str, hf_token: str, check_interval: int = 300):
