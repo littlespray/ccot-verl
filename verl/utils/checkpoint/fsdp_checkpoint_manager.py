@@ -132,14 +132,14 @@ class FSDPCheckpointManager(BaseCheckpointManager):
         )
         with get_fsdp_state_ctx(self.model, StateDictType.SHARDED_STATE_DICT, state_dict_cfg, optim_cfg):
             if self.should_load_model:
-                remote_model_path = os.path.join(local_path, f"model_world_size_{self.world_size}_rank_{self.rank}.pt")
+                remote_model_path = os.path.join(local_path, f"model_world_size_{self.world_size}_rank_{int(self.rank)%8}.pt")
                 local_model_path = copy_to_local(remote_model_path)
                 model_state_dict = torch.load(local_model_path, weights_only=False)
                 self.model.load_state_dict(model_state_dict)
                 log_with_rank(f"Loaded model from {remote_model_path}", rank=self.rank, logger=logger)
 
             if self.should_load_optimizer:
-                remote_optim_path = os.path.join(local_path, f"optim_world_size_{self.world_size}_rank_{self.rank}.pt")
+                remote_optim_path = os.path.join(local_path, f"optim_world_size_{self.world_size}_rank_{int(self.rank)%8}.pt")
                 local_optim_path = copy_to_local(remote_optim_path)
                 optimizer_state_dict = torch.load(local_optim_path, weights_only=False)
                 self.optimizer.load_state_dict(optimizer_state_dict)
@@ -147,7 +147,7 @@ class FSDPCheckpointManager(BaseCheckpointManager):
 
         if self.should_load_extra:
             remote_extra_state_path = os.path.join(
-                local_path, f"extra_state_world_size_{self.world_size}_rank_{self.rank}.pt"
+                local_path, f"extra_state_world_size_{self.world_size}_rank_{int(self.rank)%8}.pt"
             )
             local_extra_state_path = copy_to_local(remote_extra_state_path)
             extra_state_dict = torch.load(local_extra_state_path, weights_only=False)
