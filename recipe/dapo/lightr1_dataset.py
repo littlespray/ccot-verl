@@ -280,6 +280,8 @@ class LightR1Dataset(RLHFDataset):
             return self.get_window_cot_ratio(dataset_len)
         elif self.ccot_scheduler.lower() == "all":
             return [1.0] * dataset_len
+        elif self.ccot_scheduler.lower() == "constant":
+            return [0.3] * dataset_len
         elif self.ccot_scheduler.lower() == "stair":
             return self.get_stair_cot_ratio(dataset_len)
         elif self.ccot_scheduler.lower() == "linear":
@@ -462,7 +464,7 @@ def main():
     # Setup configuration based on run_dapo_lightr1_qwen2.5_32b.sh
     config = OmegaConf.create({
         "enable_ccot": True,
-        "add_cot_to_answer": True,
+        "add_cot_to_answer": False,
         "max_prompt_length": 8192,
         "max_response_length": 2048,
         "truncation": "left",
