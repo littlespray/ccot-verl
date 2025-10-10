@@ -18,10 +18,10 @@ kl_loss_coef=0.0
 clip_ratio_low=0.2
 clip_ratio_high=0.28
 
-max_prompt_length=$((1024))
+max_prompt_length=$((2048))
 max_response_length=$((1024 * 4))
 enable_overlong_buffer=True
-overlong_buffer_len=$((1024))
+overlong_buffer_len=$((512))
 overlong_penalty_factor=1.0
 
 loss_agg_mode="token-mean"
@@ -49,9 +49,9 @@ TRAIN_FILE=${TRAIN_FILE:-"${RAY_DATA_HOME}/data/train.parquet"}
 TEST_FILE=${TEST_FILE:-"${RAY_DATA_HOME}/data/aime-2024.parquet"}
 
 
-python resume_model_from_hf.py --input_path "${CKPTS_DIR}"
+# python resume_model_from_hf.py --input_path "${CKPTS_DIR}"
 
-python checkpoint_monitor.py --input_path "${CKPTS_DIR}" --interval 5 &
+# python checkpoint_monitor.py --input_path "${CKPTS_DIR}" --interval 5 &
 
 
 

@@ -41,7 +41,7 @@ class LightR1Dataset(RLHFDataset):
 
         # CCOT configuration
         self.enable_ccot = config.get("enable_ccot", False)
-        self.ccot_scheduler = config.get("ccot_scheduler", "window")
+        self.ccot_scheduler = config.get("ccot_scheduler", "all")
         self.add_cot_to_answer = config.get("add_cot_to_answer", False)
         if self.enable_ccot:
             self.cot_ratio_list = self._get_cot_ratio_list()
@@ -67,8 +67,8 @@ class LightR1Dataset(RLHFDataset):
             think_content = prompt[cot_begin_idx:cot_end_idx][len(COT_PROMPT_BEGIN):-len(COT_PROMPT_END)][len('<think>'):-len('</think>')]
             prompt = prompt[:cot_begin_idx] + prompt[cot_end_idx:]
         
-        prompt = prompt + TEMPLATE_SUFFIX + think_content
-        # logger.info(f"[Rollout] Add cot to answer Final: {prompt}")
+        prompt = prompt + TEMPLATE_SUFFIX + think_content.lstrip()
+        logger.info(f"[Rollout] Add cot to answer Final: {prompt}")
         return prompt
     
 
@@ -507,7 +507,7 @@ def main():
     num_samples = min(100, len(dataset))
     
     # Create output file
-    output_file = "lightr1_dataset_first_100_samples.txt"
+    output_file = "lightr1_dataset_first_100_samples-1011.txt"
     
     print(f"Extracting first {num_samples} samples...")
     
